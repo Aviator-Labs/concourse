@@ -11,6 +11,7 @@ import (
 	"github.com/concourse/concourse/fly/commands/internal/displayhelpers"
 	"github.com/concourse/concourse/fly/commands/internal/flaghelpers"
 	"github.com/concourse/concourse/fly/commands/internal/interaction"
+	"github.com/concourse/concourse/fly/commands/internal/templatehelpers"
 	"github.com/concourse/concourse/fly/rc"
 	"github.com/concourse/concourse/fly/ui"
 	"github.com/concourse/concourse/go-concourse/concourse"
@@ -28,9 +29,12 @@ func WireTeamConnectors(command *flags.Command) {
 }
 
 type SetTeamCommand struct {
-	Team            flaghelpers.TeamFlag `short:"n" long:"team-name" required:"true" description:"The team to create or modify"`
-	SkipInteractive bool                 `long:"non-interactive" description:"Force apply configuration"`
-	AuthFlags       skycmd.AuthTeamFlags `group:"Authentication"`
+	Team            flaghelpers.TeamFlag               `short:"n" long:"team-name" required:"true" description:"The team to create or modify"`
+	SkipInteractive bool                               `long:"non-interactive" description:"Force apply configuration"`
+	AuthFlags       skycmd.AuthTeamFlags               `group:"Authentication"`
+	Var             []flaghelpers.VariablePairFlag     `short:"v" long:"var"            unquote:"false" value-name:"[NAME=STRING]" description:"Set a string value to interpolate into the team config file"`
+	YAMLVar         []flaghelpers.YAMLVariablePairFlag `short:"y" long:"yaml-var"       unquote:"false" value-name:"[NAME=YAML]"   description:"Set a YAML value to interpolate into the team config file"`
+	VarsFrom        []atc.PathFlag                     `short:"l" long:"load-vars-from"                 value-name:"FILE"          description:"Load template variables from a YAML file for interpolation into the team config file"`
 }
 
 func (command *SetTeamCommand) Validate() ([]concourse.ConfigWarning, error) {
@@ -68,7 +72,14 @@ func (command *SetTeamCommand) Execute([]string) error {
 		return err
 	}
 
-	authRoles, err := command.AuthFlags.Format()
+	var authRoles atc.TeamAuth
+
+	if command.AuthFlags.Config != "" && command.hasVarFlags() {
+		authRoles, err = command.formatInterpolated()
+	} else {
+		authRoles, err = command.AuthFlags.Format()
+	}
+
 	if err != nil {
 		fmt.Fprintln(ui.Stderr, "error:", err)
 		os.Exit(1)
@@ -143,4 +154,25 @@ func (command *SetTeamCommand) Execute([]string) error {
 	}
 
 	return nil
+}
+
+func (command *SetTeamCommand) hasVarFlags() bool {
+	return len(command.Var) > 0 || len(command.YAMLVar) > 0 || len(command.VarsFrom) > 0
+}
+
+func (command *SetTeamCommand) formatInterpolated() (atc.TeamAuth, error) {
+	tmpl := templatehelpers.NewYamlTemplateWithParams(
+		atc.PathFlag(string(command.AuthFlags.Config)),
+		command.VarsFrom,
+		command.Var,
+		command.YAMLVar,
+		nil, // instance vars are not applicable to team configs
+	)
+
+	interpolated, err := tmpl.Evaluate(true)
+	if err != nil {
+		return nil, fmt.Errorf("variable interpolation failed: %w", err)
+	}
+
+	return command.AuthFlags.FormatFromBytes(interpolated)
 }

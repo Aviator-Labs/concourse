@@ -73,7 +73,7 @@ func (flag *AuthTeamFlags) Format() (atc.TeamAuth, error) {
 
 // e.g.
 // The github connector has configuration for: users, teams, orgs
-// The cloudfoundry conncetor has configuration for: users, orgs, spaces
+// The cloudfoundry connector has configuration for: users, orgs, spaces
 
 func (flag *AuthTeamFlags) formatFromFile() (atc.TeamAuth, error) {
 
@@ -82,10 +82,14 @@ func (flag *AuthTeamFlags) formatFromFile() (atc.TeamAuth, error) {
 		return nil, err
 	}
 
+	return flag.FormatFromBytes(content)
+}
+
+func (flag *AuthTeamFlags) FormatFromBytes(content []byte) (atc.TeamAuth, error) {
 	var data struct {
 		Roles []map[string]any `json:"roles"`
 	}
-	if err = yaml.Unmarshal(content, &data); err != nil {
+	if err := yaml.Unmarshal(content, &data); err != nil {
 		return nil, err
 	}
 
